@@ -1,0 +1,575 @@
+<title>Daily Word Count</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,500;7..72,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column notebook — log today at top, streak + totals, then the year grid, 30-day bars, and the entry history. */
+:root {
+  --paper: #f6f7fa;
+  --sheet: #ffffff;
+  --ink: #1b2233;
+  --ink-2: #4b5468;
+  --ink-3: #7a8296;
+  --rule: #dfe3ec;
+  --accent: #2747a8;
+  --accent-soft: #e7ecfa;
+  --danger: #b3261e;
+  --heat-0: #e8ebf2;
+  --heat-1: #c3cff0;
+  --heat-2: #8ba3e3;
+  --heat-3: #4f6fcf;
+  --heat-4: #233f9a;
+  --font-display: "Literata", Georgia, "Times New Roman", serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12151d; --sheet: #1a1e29; --ink: #e6e9f2; --ink-2: #b2b9ca; --ink-3: #8189a0;
+    --rule: #2b3142; --accent: #8fa8ff; --accent-soft: #232c48; --danger: #ff8a80;
+    --heat-0: #232836; --heat-1: #2c3c6e; --heat-2: #3c58a8; --heat-3: #6383e0; --heat-4: #a9bcff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12151d; --sheet: #1a1e29; --ink: #e6e9f2; --ink-2: #b2b9ca; --ink-3: #8189a0;
+  --rule: #2b3142; --accent: #8fa8ff; --accent-soft: #232c48; --danger: #ff8a80;
+  --heat-0: #232836; --heat-1: #2c3c6e; --heat-2: #3c58a8; --heat-3: #6383e0; --heat-4: #a9bcff;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--paper); color: var(--ink);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding: 0 16px;
+}
+.wrap { max-width: 860px; margin: 0 auto; padding-block: 28px 56px; display: grid; gap: 22px; }
+h1, h2 { font-family: var(--font-display); font-weight: 700; margin: 0; text-wrap: balance; }
+h1 { font-size: 30px; line-height: 1.15; }
+h2 { font-size: 19px; }
+.eyebrow { font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 16px; }
+header .today { color: var(--ink-2); }
+.status { font-size: 13px; color: var(--ink-3); }
+
+.panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; padding: 20px; min-width: 0; }
+.section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; margin-bottom: 14px; }
+.section-head p { margin: 0; color: var(--ink-3); font-size: 13px; }
+
+/* Log form */
+.log { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 24px; }
+@media (max-width: 680px) { .log { grid-template-columns: 1fr; } }
+.today-card { display: grid; gap: 8px; align-content: start; }
+.today-words { font-family: var(--font-display); font-size: 52px; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
+.today-words small { font-family: var(--font-body); font-size: 15px; font-weight: 500; color: var(--ink-2); margin-left: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 500; width: fit-content; }
+.chip.done { background: var(--accent-soft); color: var(--accent); }
+.chip.todo { background: var(--heat-0); color: var(--ink-2); }
+.chip svg { width: 13px; height: 13px; }
+.meter { height: 8px; background: var(--heat-0); border-radius: 999px; overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .3s ease; }
+.meter-label { font-size: 13px; color: var(--ink-2); }
+.pages { font-size: 13px; color: var(--ink-3); }
+
+form { display: grid; gap: 12px; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; }
+.row > label { flex: 1 1 140px; }
+label { display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); font-weight: 500; }
+input, textarea {
+  font: inherit; color: var(--ink); background: var(--paper);
+  border: 1px solid var(--rule); border-radius: 7px; padding: 8px 10px; width: 100%;
+}
+input[type="number"] { font-family: var(--font-data); }
+textarea { resize: vertical; min-height: 56px; }
+input:focus-visible, textarea:focus-visible, button:focus-visible, .cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 7px; overflow: hidden; width: fit-content; }
+.seg button { border: 0; border-radius: 0; background: transparent; color: var(--ink-2); padding: 6px 12px; font-weight: 500; }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+button {
+  font: inherit; cursor: pointer; border-radius: 7px; padding: 9px 16px;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--sheet); font-weight: 600;
+}
+button.ghost { background: transparent; color: var(--accent); }
+button.text { border: 0; background: transparent; color: var(--ink-3); padding: 4px 8px; font-weight: 500; }
+button.text:hover { color: var(--ink); }
+button.danger { background: var(--danger); border-color: var(--danger); color: var(--sheet); padding: 4px 10px; font-size: 13px; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.hint { font-size: 12.5px; color: var(--ink-3); margin: 0; }
+.msg { font-size: 13px; color: var(--accent); min-height: 1.2em; }
+.msg.err { color: var(--danger); }
+
+/* Stats */
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+@media (max-width: 680px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 16px; } }
+.stat { padding: 2px 16px; border-left: 1px solid var(--rule); display: grid; gap: 2px; }
+.stat:first-child { border-left: 0; padding-left: 0; }
+@media (max-width: 680px) { .stat:nth-child(3) { border-left: 0; padding-left: 0; } }
+.stat .v { font-family: var(--font-display); font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat .v small { font-family: var(--font-body); font-size: 13px; font-weight: 500; color: var(--ink-3); margin-left: 4px; }
+.stat .s { font-size: 12.5px; color: var(--ink-3); }
+
+/* Charts */
+.scroll { overflow-x: auto; }
+svg text { fill: var(--ink-3); font-family: var(--font-data); font-size: 10px; }
+.cell { cursor: pointer; }
+.cell:hover { stroke: var(--ink); stroke-width: 1.5; }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: var(--ink-3); margin-top: 10px; }
+.legend .sw { display: inline-flex; gap: 3px; align-items: center; }
+.legend i { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
+.bar { cursor: pointer; }
+.bar:hover { opacity: .8; }
+.tip {
+  position: fixed; z-index: 10; pointer-events: none; background: var(--ink); color: var(--paper);
+  padding: 6px 9px; border-radius: 6px; font-size: 12.5px; line-height: 1.35; max-width: 240px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.18);
+}
+.tip b { font-family: var(--font-data); font-weight: 500; }
+
+/* History */
+.history { list-style: none; margin: 0; padding: 0; display: grid; }
+.history li { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; gap: 4px 14px; align-items: baseline; padding: 10px 0; border-top: 1px solid var(--rule); }
+.history li:first-child { border-top: 0; }
+@media (max-width: 520px) { .history li { grid-template-columns: minmax(0, 1fr) auto; } .history .note { grid-column: 1 / -1; order: 3; } }
+.history .d { font-size: 13.5px; color: var(--ink-2); }
+.history .w { font-family: var(--font-data); font-variant-numeric: tabular-nums; font-size: 14px; }
+.history .note { color: var(--ink-2); font-size: 13.5px; overflow-wrap: anywhere; }
+.history .acts { display: flex; gap: 4px; align-items: center; justify-self: end; }
+.history .confirm { font-size: 13px; color: var(--ink-2); display: inline-flex; gap: 6px; align-items: center; }
+.empty { color: var(--ink-3); font-size: 14px; padding: 8px 0; }
+.goal-edit { display: inline-flex; gap: 6px; align-items: center; }
+.goal-edit input { width: 96px; padding: 5px 8px; }
+.goal-edit button { padding: 5px 10px; font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Writing log</div>
+      <h1>Daily Word Count</h1>
+    </div>
+    <div style="display:grid;justify-items:end;gap:2px">
+      <div class="today" id="todayLabel"></div>
+      <div class="status" id="status">Loading your log…</div>
+    </div>
+  </header>
+
+  <section class="panel log" aria-labelledby="logHead">
+    <div class="today-card">
+      <div class="eyebrow" id="logHead">Today</div>
+      <div class="today-words" id="todayWords">0<small>words</small></div>
+      <div id="todayChip"></div>
+      <div class="meter" aria-hidden="true"><span id="meterFill" style="width:0%"></span></div>
+      <div class="meter-label" id="meterLabel"></div>
+      <div class="pages" id="pagesLabel"></div>
+    </div>
+
+    <form id="logForm" novalidate>
+      <div class="seg" role="group" aria-label="How to record the count">
+        <button type="button" id="modeAdd" aria-pressed="true">Add a session</button>
+        <button type="button" id="modeSet" aria-pressed="false">Set day total</button>
+      </div>
+      <div class="row">
+        <label for="fDate">Date
+          <input type="date" id="fDate" required>
+        </label>
+        <label for="fWords"><span id="wordsLabel">Words this session</span>
+          <input type="number" id="fWords" min="0" step="1" inputmode="numeric" placeholder="e.g. 750">
+        </label>
+      </div>
+      <label for="fNote">Note <span style="color:var(--ink-3);font-weight:400">(optional)</span>
+        <textarea id="fNote" rows="2" placeholder="What did you work on?"></textarea>
+      </label>
+      <div class="form-actions">
+        <button type="submit" id="saveBtn">Log writing</button>
+        <span class="msg" id="formMsg" role="status"></span>
+      </div>
+      <p class="hint" id="formHint">Leave the word count blank to mark the day as written without a count.</p>
+    </form>
+  </section>
+
+  <section class="panel" aria-label="Totals">
+    <div class="stats">
+      <div class="stat"><span class="eyebrow">Current streak</span><span class="v" id="sStreak">0</span><span class="s" id="sStreakSub"></span></div>
+      <div class="stat"><span class="eyebrow">Longest streak</span><span class="v" id="sLongest">0</span><span class="s">consecutive days</span></div>
+      <div class="stat"><span class="eyebrow">This month</span><span class="v" id="sMonth">0</span><span class="s" id="sMonthSub"></span></div>
+      <div class="stat"><span class="eyebrow">All time</span><span class="v" id="sTotal">0</span><span class="s" id="sTotalSub"></span></div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="gridHead">
+    <div class="section-head">
+      <h2 id="gridHead">Last 26 weeks</h2>
+      <p>Tap a day to fill the form with it.</p>
+    </div>
+    <div class="scroll"><svg id="heat" role="img" aria-label="Calendar of writing days"></svg></div>
+    <div class="legend">
+      <span class="sw">No writing <i style="background:var(--heat-0)"></i></span>
+      <span class="sw">Under half of goal <i style="background:var(--heat-1)"></i></span>
+      <span class="sw">Under goal <i style="background:var(--heat-2)"></i></span>
+      <span class="sw">Goal met <i style="background:var(--heat-3)"></i></span>
+      <span class="sw">1.5× goal or more <i style="background:var(--heat-4)"></i></span>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="barHead">
+    <div class="section-head">
+      <h2 id="barHead">Words per day, last 30 days</h2>
+      <div class="goal-edit">
+        <label for="fGoal" style="display:inline;font-weight:500">Daily goal</label>
+        <input type="number" id="fGoal" min="1" step="50" inputmode="numeric">
+        <button type="button" class="ghost" id="goalBtn">Save goal</button>
+      </div>
+    </div>
+    <div class="scroll"><svg id="bars" role="img" aria-label="Bar chart of words per day for the last 30 days"></svg></div>
+  </section>
+
+  <section class="panel" aria-labelledby="histHead">
+    <div class="section-head">
+      <h2 id="histHead">Entries</h2>
+      <p id="histCount"></p>
+    </div>
+    <ul class="history" id="history"></ul>
+    <div style="margin-top:8px"><button type="button" class="text" id="moreBtn" hidden>Show more</button></div>
+  </section>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+(() => {
+  const WORDS_PER_PAGE = 250; // standard manuscript page
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n) => Number(n || 0).toLocaleString();
+  const pad = (n) => String(n).padStart(2, "0");
+  const keyOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const parseKey = (k) => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
+  const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const longDate = (k) => parseKey(k).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  const shortDate = (k) => parseKey(k).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const todayKey = () => keyOf(new Date());
+
+  let days = {};          // date -> {date, words, counted, note}
+  let goal = 500;
+  let canWrite = true;
+  let mode = "add";
+  let shown = 14;
+  let confirming = null;
+
+  /* ---------- storage: artifact db when available, else localStorage ---------- */
+  const LS = "daily-word-count-v1";
+  const local = {
+    read() { try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch { return {}; } },
+    write(o) { try { localStorage.setItem(LS, JSON.stringify(o)); } catch {} },
+  };
+  let db = null;
+  const store = {
+    async saveDay(e) {
+      if (db) return db.doc("days/" + e.date).set(e);
+      days[e.date] = e; local.write({ days, goal }); render();
+    },
+    async deleteDay(date) {
+      if (db) return db.doc("days/" + date).delete();
+      delete days[date]; local.write({ days, goal }); render();
+    },
+    async saveGoal(g) {
+      if (db) return db.doc("settings/main").set({ goal: g });
+      goal = g; local.write({ days, goal }); render();
+    },
+  };
+
+  function useLocal(note) {
+    const o = local.read();
+    days = o.days || {};
+    goal = o.goal || 500;
+    $("status").textContent = note;
+    render();
+  }
+
+  async function boot() {
+    const c = window.claude;
+    if (!c || typeof c.use !== "function") { useLocal("Saved in this browser"); return; }
+    $("status").textContent = "Connecting…";
+    const [d, u] = await Promise.all([c.use("db").catch(() => null), c.use("user").catch(() => null)]);
+    if (!d) { useLocal("Saved in this browser"); return; }
+    db = d;
+    if (u) {
+      try { canWrite = !!(await u.isOwner()); } catch { canWrite = true; }
+    }
+    $("status").textContent = canWrite ? "Saved to your account" : "View only";
+    applyWriteState();
+    db.collection("days").onSnapshot((snap) => {
+      const next = {};
+      snap.docs.forEach((doc) => { const v = doc.data(); if (v && v.date) next[v.date] = v; });
+      days = next; render();
+    }, () => { $("status").textContent = "Lost connection. Reload to see new entries."; });
+    db.doc("settings/main").onSnapshot((snap) => {
+      const v = snap.exists ? snap.data() : null;
+      if (v && v.goal) goal = v.goal;
+      render();
+    }, () => {});
+    render();
+  }
+
+  function applyWriteState() {
+    ["fDate", "fWords", "fNote", "saveBtn", "fGoal", "goalBtn", "modeAdd", "modeSet"].forEach((id) => { $(id).disabled = !canWrite; });
+    if (!canWrite) $("formHint").textContent = "Only the owner of this log can add entries.";
+  }
+
+  /* ---------- derived numbers ---------- */
+  const wrote = (k) => !!days[k];
+  function streaks() {
+    let cur = 0;
+    let d = new Date();
+    if (!wrote(keyOf(d))) d = addDays(d, -1); // today still counts as "in progress"
+    while (wrote(keyOf(d))) { cur++; d = addDays(d, -1); }
+    const keys = Object.keys(days).sort();
+    let best = 0, run = 0, prev = null;
+    for (const k of keys) {
+      run = prev && keyOf(addDays(parseKey(prev), 1)) === k ? run + 1 : 1;
+      best = Math.max(best, run); prev = k;
+    }
+    return { cur, best };
+  }
+  function level(e) {
+    if (!e) return 0;
+    if (!e.counted || !e.words) return 1;
+    const r = e.words / goal;
+    return r < 0.5 ? 1 : r < 1 ? 2 : r < 1.5 ? 3 : 4;
+  }
+
+  /* ---------- rendering ---------- */
+  const checkSvg = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5"/></svg>';
+
+  function render() {
+    const tk = todayKey();
+    $("todayLabel").textContent = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+    if (!$("fDate").value) $("fDate").value = tk;
+    $("fDate").max = tk;
+    if (document.activeElement !== $("fGoal")) $("fGoal").value = goal;
+
+    const t = days[tk];
+    const tw = t && t.counted ? t.words : 0;
+    $("todayWords").innerHTML = `${fmt(tw)}<small>words</small>`;
+    $("todayChip").innerHTML = t
+      ? `<span class="chip done">${checkSvg}Wrote today${t.counted ? "" : " (no count)"}</span>`
+      : `<span class="chip todo">Not yet today</span>`;
+    const pct = Math.min(100, Math.round((tw / goal) * 100));
+    $("meterFill").style.width = pct + "%";
+    $("meterLabel").textContent = tw >= goal
+      ? `Goal of ${fmt(goal)} met${tw > goal ? `, ${fmt(tw - goal)} over` : ""}.`
+      : `${fmt(goal - tw)} words to your ${fmt(goal)}-word goal.`;
+    $("pagesLabel").textContent = tw ? `About ${(tw / WORDS_PER_PAGE).toFixed(1)} manuscript pages at ${WORDS_PER_PAGE} words a page.` : "";
+
+    const { cur, best } = streaks();
+    $("sStreak").innerHTML = `${cur}<small>${cur === 1 ? "day" : "days"}</small>`;
+    $("sStreakSub").textContent = cur && !wrote(tk) ? "Write today to keep it going" : cur ? "Including today" : "Log a day to start one";
+    $("sLongest").innerHTML = `${best}<small>${best === 1 ? "day" : "days"}</small>`;
+    const ym = tk.slice(0, 7);
+    const monthEntries = Object.values(days).filter((e) => e.date.startsWith(ym));
+    const monthWords = monthEntries.reduce((s, e) => s + (e.counted ? e.words : 0), 0);
+    $("sMonth").innerHTML = `${fmt(monthWords)}<small>words</small>`;
+    $("sMonthSub").textContent = `${monthEntries.length} of ${new Date().getDate()} days written`;
+    const all = Object.values(days);
+    const total = all.reduce((s, e) => s + (e.counted ? e.words : 0), 0);
+    const countedDays = all.filter((e) => e.counted && e.words).length;
+    $("sTotal").innerHTML = `${fmt(total)}<small>words</small>`;
+    $("sTotalSub").textContent = countedDays ? `${fmt(Math.round(total / countedDays))} a day on average` : "No counted days yet";
+
+    renderHeat();
+    renderBars();
+    renderHistory();
+  }
+
+  function renderHeat() {
+    const svg = $("heat");
+    const C = 13, G = 3, S = C + G, WEEKS = 26, LEFT = 28, TOP = 16;
+    const today = new Date();
+    const start = addDays(today, -today.getDay() - (WEEKS - 1) * 7); // a Sunday
+    const W = LEFT + WEEKS * S, H = TOP + 7 * S;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("width", W); svg.setAttribute("height", H);
+    let out = "";
+    ["Mon", "Wed", "Fri"].forEach((l, i) => { out += `<text x="0" y="${TOP + (i * 2 + 1) * S + C - 3}">${l}</text>`; });
+    let lastMonth = -1;
+    for (let w = 0; w < WEEKS; w++) {
+      const first = addDays(start, w * 7);
+      if (first.getMonth() !== lastMonth && first.getDate() <= 7) {
+        out += `<text x="${LEFT + w * S}" y="10">${first.toLocaleDateString(undefined, { month: "short" })}</text>`;
+      }
+      lastMonth = first.getMonth();
+      for (let r = 0; r < 7; r++) {
+        const d = addDays(start, w * 7 + r);
+        if (d > today) continue;
+        const k = keyOf(d);
+        out += `<rect class="cell" tabindex="0" data-k="${k}" x="${LEFT + w * S}" y="${TOP + r * S}" width="${C}" height="${C}" rx="3" fill="var(--heat-${level(days[k])})"></rect>`;
+      }
+    }
+    svg.innerHTML = out;
+  }
+
+  function renderBars() {
+    const svg = $("bars");
+    const N = 30, W = 720, H = 220, L = 46, R = 8, T = 14, B = 26;
+    const today = new Date();
+    const list = Array.from({ length: N }, (_, i) => keyOf(addDays(today, i - N + 1)));
+    const max = Math.max(goal, ...list.map((k) => (days[k] && days[k].counted ? days[k].words : 0)));
+    const top = niceCeil(max * 1.1);
+    const y = (v) => T + (H - T - B) * (1 - v / top);
+    const slot = (W - L - R) / N, bw = Math.max(4, slot - 4);
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("width", "100%"); svg.style.minWidth = "520px"; svg.style.display = "block";
+    let out = "";
+    [0, top / 2, top].forEach((v) => {
+      out += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--rule)" stroke-width="1"></line>`;
+      out += `<text x="${L - 6}" y="${y(v) + 3}" text-anchor="end">${fmt(v)}</text>`;
+    });
+    list.forEach((k, i) => {
+      const e = days[k];
+      const x = L + i * slot + (slot - bw) / 2;
+      out += `<rect class="bar" data-k="${k}" x="${L + i * slot}" y="${T}" width="${slot}" height="${H - T - B}" fill="transparent"></rect>`;
+      if (e && e.counted && e.words) {
+        const h = Math.max(2, y(0) - y(e.words));
+        const r = Math.min(4, bw / 2, h);
+        const yy = y(0) - h;
+        out += `<path pointer-events="none" d="M${x},${y(0)} V${yy + r} Q${x},${yy} ${x + r},${yy} H${x + bw - r} Q${x + bw},${yy} ${x + bw},${yy + r} V${y(0)} Z" fill="${e.words >= goal ? "var(--heat-4)" : "var(--heat-2)"}"></path>`;
+      } else if (e) {
+        out += `<circle pointer-events="none" cx="${x + bw / 2}" cy="${y(0) - 6}" r="4" fill="var(--heat-2)"></circle>`;
+      }
+    });
+    out += `<line x1="${L}" x2="${W - R}" y1="${y(goal)}" y2="${y(goal)}" stroke="var(--ink-2)" stroke-width="1.5" stroke-dasharray="5 4"></line>`;
+    out += `<text x="${W - R}" y="${y(goal) - 5}" text-anchor="end" style="fill:var(--ink-2)">goal ${fmt(goal)}</text>`;
+    [0, 14, N - 1].forEach((i) => {
+      out += `<text x="${L + i * slot + slot / 2}" y="${H - 8}" text-anchor="middle">${i === N - 1 ? "Today" : shortDate(list[i])}</text>`;
+    });
+    svg.innerHTML = out;
+  }
+  function niceCeil(v) {
+    const p = Math.pow(10, Math.floor(Math.log10(v)));
+    for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * p >= v) return m * p;
+    return 10 * p;
+  }
+
+  function renderHistory() {
+    const list = Object.values(days).sort((a, b) => (a.date < b.date ? 1 : -1));
+    const ul = $("history");
+    $("histCount").textContent = list.length ? `${list.length} ${list.length === 1 ? "day" : "days"} logged` : "";
+    if (!list.length) {
+      ul.innerHTML = `<li class="empty" style="display:block">No entries yet. Log today's writing above and it will show up here, on the calendar, and in the chart.</li>`;
+      $("moreBtn").hidden = true;
+      return;
+    }
+    ul.innerHTML = list.slice(0, shown).map((e) => {
+      const words = e.counted ? `${fmt(e.words)} words` : "Wrote, no count";
+      const acts = !canWrite ? "" : confirming === e.date
+        ? `<span class="confirm">Delete this day? <button type="button" class="danger" data-del="${e.date}">Delete</button><button type="button" class="text" data-cancel>Cancel</button></span>`
+        : `<button type="button" class="text" data-edit="${e.date}">Edit</button><button type="button" class="text" data-ask="${e.date}">Delete</button>`;
+      return `<li><span class="d">${longDate(e.date)}</span><span class="w">${words}</span><span class="acts">${acts}</span>${e.note ? `<span class="note" style="grid-column:2/-1"></span>` : ""}</li>`;
+    }).join("");
+    // notes set via textContent so typed text never becomes markup
+    const items = ul.querySelectorAll("li");
+    list.slice(0, shown).forEach((e, i) => { const n = items[i].querySelector(".note"); if (n) n.textContent = e.note; });
+    $("moreBtn").hidden = list.length <= shown;
+  }
+
+  /* ---------- form ---------- */
+  function setMode(m) {
+    mode = m;
+    $("modeAdd").setAttribute("aria-pressed", m === "add");
+    $("modeSet").setAttribute("aria-pressed", m === "set");
+    $("wordsLabel").textContent = m === "add" ? "Words this session" : "Total words for the day";
+    $("saveBtn").textContent = m === "add" ? "Log writing" : "Save day";
+  }
+  $("modeAdd").onclick = () => setMode("add");
+  $("modeSet").onclick = () => setMode("set");
+
+  function loadDay(k) {
+    $("fDate").value = k;
+    const e = days[k];
+    if (e) { setMode("set"); $("fWords").value = e.counted ? e.words : ""; $("fNote").value = e.note || ""; }
+    else { setMode("add"); $("fWords").value = ""; $("fNote").value = ""; }
+    $("formMsg").textContent = e ? `Editing ${shortDate(k)}.` : `Logging for ${shortDate(k)}.`;
+    $("formMsg").className = "msg";
+    $("logForm").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("fWords").focus({ preventScroll: true });
+  }
+
+  $("logForm").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    if (!canWrite) return;
+    const msg = $("formMsg");
+    const k = $("fDate").value;
+    const raw = $("fWords").value.trim();
+    if (!k) { msg.textContent = "Pick a date."; msg.className = "msg err"; return; }
+    if (k > todayKey()) { msg.textContent = "That date is in the future. Pick today or earlier."; msg.className = "msg err"; return; }
+    if (raw !== "" && (!/^\d+$/.test(raw))) { msg.textContent = "Enter the word count as a whole number."; msg.className = "msg err"; return; }
+    const n = raw === "" ? null : parseInt(raw, 10);
+    const prev = days[k];
+    const note = $("fNote").value.trim();
+    let entry;
+    if (mode === "add") {
+      const base = prev && prev.counted ? prev.words : 0;
+      const words = base + (n || 0);
+      const mergedNote = [prev && prev.note, note].filter(Boolean).join(" · ");
+      entry = { date: k, words, counted: words > 0 || !!(prev && prev.counted), note: mergedNote, updatedAt: new Date().toISOString() };
+    } else {
+      entry = { date: k, words: n || 0, counted: n !== null, note, updatedAt: new Date().toISOString() };
+    }
+    $("saveBtn").disabled = true;
+    try {
+      await store.saveDay(entry);
+      msg.className = "msg";
+      msg.textContent = entry.counted ? `Saved ${fmt(entry.words)} words for ${shortDate(k)}.` : `Marked ${shortDate(k)} as written.`;
+      $("fWords").value = ""; $("fNote").value = "";
+      if (mode === "set") setMode("add");
+    } catch (e) {
+      msg.className = "msg err";
+      msg.textContent = "Couldn't save. Check your connection and try again.";
+    } finally { $("saveBtn").disabled = !canWrite; }
+  });
+
+  $("goalBtn").onclick = async () => {
+    const g = parseInt($("fGoal").value, 10);
+    if (!g || g < 1) { $("fGoal").value = goal; return; }
+    try { await store.saveGoal(g); goal = g; render(); } catch { $("fGoal").value = goal; }
+  };
+
+  $("history").addEventListener("click", async (ev) => {
+    const b = ev.target.closest("button");
+    if (!b) return;
+    if (b.dataset.edit) loadDay(b.dataset.edit);
+    else if (b.dataset.ask) { confirming = b.dataset.ask; renderHistory(); }
+    else if ("cancel" in b.dataset) { confirming = null; renderHistory(); }
+    else if (b.dataset.del) { const k = b.dataset.del; confirming = null; try { await store.deleteDay(k); } catch {} renderHistory(); }
+  });
+  $("moreBtn").onclick = () => { shown += 30; renderHistory(); };
+
+  /* ---------- tooltips + click-to-load ---------- */
+  const tip = $("tip");
+  function tipText(k) {
+    const e = days[k];
+    if (!e) return `${longDate(k)}<br>No writing logged`;
+    return `${longDate(k)}<br>${e.counted ? `<b>${fmt(e.words)}</b> words` : "Wrote, no count"}`;
+  }
+  function showTip(k, x, y) {
+    tip.innerHTML = tipText(k); tip.hidden = false;
+    const r = tip.getBoundingClientRect();
+    tip.style.left = Math.min(window.innerWidth - r.width - 8, Math.max(8, x + 12)) + "px";
+    tip.style.top = Math.max(8, y - r.height - 12) + "px";
+  }
+  ["heat", "bars"].forEach((id) => {
+    const el = $(id);
+    el.addEventListener("pointermove", (ev) => { const t = ev.target.closest("[data-k]"); if (t) showTip(t.dataset.k, ev.clientX, ev.clientY); else tip.hidden = true; });
+    el.addEventListener("pointerleave", () => { tip.hidden = true; });
+    el.addEventListener("click", (ev) => { const t = ev.target.closest("[data-k]"); if (t && canWrite) { tip.hidden = true; loadDay(t.dataset.k); } });
+    el.addEventListener("focusin", (ev) => { const t = ev.target.closest("[data-k]"); if (t) { const r = t.getBoundingClientRect(); showTip(t.dataset.k, r.right, r.top); } });
+    el.addEventListener("focusout", () => { tip.hidden = true; });
+    el.addEventListener("keydown", (ev) => { const t = ev.target.closest("[data-k]"); if (t && (ev.key === "Enter" || ev.key === " ") && canWrite) { ev.preventDefault(); loadDay(t.dataset.k); } });
+  });
+
+  render();
+  boot();
+})();
+</script>

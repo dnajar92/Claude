@@ -52,7 +52,8 @@ h2 { font-size: 19px; }
 .num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
 header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 16px; }
 header .today { color: var(--ink-2); }
-.status { font-size: 13px; color: var(--ink-3); }
+.status { font-size: 13px; color: var(--ink-3); max-width: 340px; text-align: right; }
+.status.warn { color: var(--danger); }
 
 .panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; padding: 20px; min-width: 0; }
 .section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; margin-bottom: 14px; }
@@ -257,6 +258,7 @@ svg text { fill: var(--ink-3); font-family: var(--font-data); font-size: 10px; }
   let mode = "add";
   let shown = 14;
   let confirming = null;
+  let shownToday = null;
 
   /* ---------- storage: artifact db when available, else localStorage ---------- */
   const LS = "daily-word-count-v1";
@@ -265,57 +267,135 @@ svg text { fill: var(--ink-3); font-family: var(--font-data); font-size: 10px; }
     write(o) { try { localStorage.setItem(LS, JSON.stringify(o)); } catch {} },
   };
   let db = null;
+  let ready = false;      // true once saved entries have loaded; saving waits for it
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  // retry once on a brief connection drop, as the store's contract advises
+  async function retry(fn) {
+    try { return await fn(); }
+    catch (e) {
+      if (e && (e.code === "unavailable" || !e.code)) { await wait(500 + Math.random() * 700); return fn(); }
+      throw e;
+    }
+  }
   const store = {
+    async getDay(date) {
+      if (!db) return days[date] || null;
+      const snap = await retry(() => db.doc("days/" + date).get());
+      return snap.exists ? snap.data() : null;
+    },
     async saveDay(e) {
-      if (db) return db.doc("days/" + e.date).set(e);
+      if (db) return retry(() => db.doc("days/" + e.date).set(e));
       days[e.date] = e; local.write({ days, goal }); render();
     },
     async deleteDay(date) {
-      if (db) return db.doc("days/" + date).delete();
+      if (db) return retry(() => db.doc("days/" + date).delete());
       delete days[date]; local.write({ days, goal }); render();
     },
     async saveGoal(g) {
-      if (db) return db.doc("settings/main").set({ goal: g });
+      if (db) return retry(() => db.doc("settings/main").set({ goal: g }));
       goal = g; local.write({ days, goal }); render();
     },
   };
 
-  function useLocal(note) {
+  function setStatus(text, warn) {
+    $("status").textContent = text;
+    $("status").classList.toggle("warn", !!warn);
+  }
+  function setReady(v) {
+    ready = v;
+    $("saveBtn").disabled = !canWrite || !ready;
+    $("goalBtn").disabled = !canWrite || !ready;
+    if (!ready) $("saveBtn").textContent = "Loading…";
+    else setMode(mode);
+  }
+
+  function useLocal(note, warn) {
     const o = local.read();
     days = o.days || {};
     goal = o.goal || 500;
-    $("status").textContent = note;
+    setStatus(note, warn);
+    setReady(true);
     render();
+  }
+
+  // Entries saved in this browser while the account was unreachable get copied up once it connects.
+  async function moveLocalEntriesUp() {
+    const o = local.read();
+    const pending = Object.values(o.days || {}).filter((e) => e && e.date && !days[e.date]);
+    if (!pending.length) return;
+    let moved = 0;
+    for (const e of pending) {
+      try { await store.saveDay(e); moved++; } catch { /* keep it locally and try next visit */ }
+    }
+    if (moved === pending.length) local.write({ days: {}, goal: o.goal });
+    if (moved) setStatus(`Saved to your account (moved ${moved} ${moved === 1 ? "entry" : "entries"} from this browser)`);
+  }
+
+  function subscribeDays(attempt) {
+    let first = true;
+    db.collection("days").onSnapshot((snap) => {
+      const next = {};
+      snap.docs.forEach((doc) => { const v = doc.data(); if (v && v.date) next[v.date] = v; });
+      days = next;
+      if (first) {
+        first = false;
+        setStatus(canWrite ? "Saved to your account" : "View only");
+        setReady(true);
+        if (canWrite) moveLocalEntriesUp();
+      }
+      render();
+    }, () => {
+      setReady(false);
+      if (attempt < 1) { setStatus("Reconnecting…", true); setTimeout(() => subscribeDays(attempt + 1), 2000); }
+      else setStatus("Lost connection to your account. Reload the page before logging more writing.", true);
+    });
   }
 
   async function boot() {
     const c = window.claude;
     if (!c || typeof c.use !== "function") { useLocal("Saved in this browser"); return; }
-    $("status").textContent = "Connecting…";
+    setStatus("Connecting…");
     const [d, u] = await Promise.all([c.use("db").catch(() => null), c.use("user").catch(() => null)]);
-    if (!d) { useLocal("Saved in this browser"); return; }
+    if (!d) { useLocal("Couldn't reach your account, so entries save in this browser for now. They move to your account next time it connects.", true); return; }
     db = d;
     if (u) {
       try { canWrite = !!(await u.isOwner()); } catch { canWrite = true; }
     }
-    $("status").textContent = canWrite ? "Saved to your account" : "View only";
     applyWriteState();
-    db.collection("days").onSnapshot((snap) => {
-      const next = {};
-      snap.docs.forEach((doc) => { const v = doc.data(); if (v && v.date) next[v.date] = v; });
-      days = next; render();
-    }, () => { $("status").textContent = "Lost connection. Reload to see new entries."; });
+    subscribeDays(0);
     db.doc("settings/main").onSnapshot((snap) => {
       const v = snap.exists ? snap.data() : null;
       if (v && v.goal) goal = v.goal;
       render();
     }, () => {});
-    render();
   }
 
   function applyWriteState() {
-    ["fDate", "fWords", "fNote", "saveBtn", "fGoal", "goalBtn", "modeAdd", "modeSet"].forEach((id) => { $(id).disabled = !canWrite; });
+    ["fDate", "fWords", "fNote", "fGoal", "modeAdd", "modeSet"].forEach((id) => { $(id).disabled = !canWrite; });
+    setReady(ready);
     if (!canWrite) $("formHint").textContent = "Only the owner of this log can add entries.";
+  }
+
+  /* ---------- unsaved typing survives closing the page ---------- */
+  const DRAFT = LS + "-draft";
+  function saveDraft() {
+    const d = { date: $("fDate").value, words: $("fWords").value, note: $("fNote").value, mode };
+    try {
+      if (d.words.trim() || d.note.trim()) localStorage.setItem(DRAFT, JSON.stringify(d));
+      else localStorage.removeItem(DRAFT);
+    } catch {}
+  }
+  function clearDraft() { try { localStorage.removeItem(DRAFT); } catch {} }
+  function restoreDraft() {
+    let d = null;
+    try { d = JSON.parse(localStorage.getItem(DRAFT)); } catch {}
+    if (!d || !(String(d.words || "").trim() || String(d.note || "").trim())) return;
+    if (d.date) $("fDate").value = d.date;
+    $("fWords").value = d.words || "";
+    $("fNote").value = d.note || "";
+    setMode(d.mode === "set" ? "set" : "add");
+    $("formMsg").className = "msg err";
+    $("formMsg").textContent = "You left without saving this. Press the button to save it.";
   }
 
   /* ---------- derived numbers ---------- */
@@ -346,7 +426,9 @@ svg text { fill: var(--ink-3); font-family: var(--font-data); font-size: 10px; }
   function render() {
     const tk = todayKey();
     $("todayLabel").textContent = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
-    if (!$("fDate").value) $("fDate").value = tk;
+    // a page left open overnight moves the date forward instead of logging to yesterday
+    if (!$("fDate").value || ($("fDate").value === shownToday && tk !== shownToday)) $("fDate").value = tk;
+    shownToday = tk;
     $("fDate").max = tk;
     if (document.activeElement !== $("fGoal")) $("fGoal").value = goal;
 
@@ -480,10 +562,11 @@ svg text { fill: var(--ink-3); font-family: var(--font-data); font-size: 10px; }
     $("modeAdd").setAttribute("aria-pressed", m === "add");
     $("modeSet").setAttribute("aria-pressed", m === "set");
     $("wordsLabel").textContent = m === "add" ? "Words this session" : "Total words for the day";
-    $("saveBtn").textContent = m === "add" ? "Log writing" : "Save day";
+    if (ready) $("saveBtn").textContent = m === "add" ? "Log writing" : "Save day";
   }
-  $("modeAdd").onclick = () => setMode("add");
-  $("modeSet").onclick = () => setMode("set");
+  $("modeAdd").onclick = () => { setMode("add"); saveDraft(); };
+  $("modeSet").onclick = () => { setMode("set"); saveDraft(); };
+  ["fDate", "fWords", "fNote"].forEach((id) => $(id).addEventListener("input", saveDraft));
 
   function loadDay(k) {
     $("fDate").value = k;
@@ -498,7 +581,7 @@ svg text { fill: var(--ink-3); font-family: var(--font-data); font-size: 10px; }
 
   $("logForm").addEventListener("submit", async (ev) => {
     ev.preventDefault();
-    if (!canWrite) return;
+    if (!canWrite || !ready) return;
     const msg = $("formMsg");
     const k = $("fDate").value;
     const raw = $("fWords").value.trim();
@@ -506,8 +589,16 @@ svg text { fill: var(--ink-3); font-family: var(--font-data); font-size: 10px; }
     if (k > todayKey()) { msg.textContent = "That date is in the future. Pick today or earlier."; msg.className = "msg err"; return; }
     if (raw !== "" && (!/^\d+$/.test(raw))) { msg.textContent = "Enter the word count as a whole number."; msg.className = "msg err"; return; }
     const n = raw === "" ? null : parseInt(raw, 10);
-    const prev = days[k];
     const note = $("fNote").value.trim();
+    $("saveBtn").disabled = true;
+    $("saveBtn").textContent = "Saving…";
+    let prev;
+    try { prev = await store.getDay(k); } // read the day fresh so a session adds to the real total
+    catch {
+      msg.className = "msg err";
+      msg.textContent = "Couldn't reach your account, so nothing was saved. Your words are still here; try again in a moment.";
+      setReady(ready); return;
+    }
     let entry;
     if (mode === "add") {
       const base = prev && prev.counted ? prev.words : 0;
@@ -517,23 +608,24 @@ svg text { fill: var(--ink-3); font-family: var(--font-data); font-size: 10px; }
     } else {
       entry = { date: k, words: n || 0, counted: n !== null, note, updatedAt: new Date().toISOString() };
     }
-    $("saveBtn").disabled = true;
     try {
       await store.saveDay(entry);
+      clearDraft();
       msg.className = "msg";
       msg.textContent = entry.counted ? `Saved ${fmt(entry.words)} words for ${shortDate(k)}.` : `Marked ${shortDate(k)} as written.`;
       $("fWords").value = ""; $("fNote").value = "";
       if (mode === "set") setMode("add");
     } catch (e) {
       msg.className = "msg err";
-      msg.textContent = "Couldn't save. Check your connection and try again.";
-    } finally { $("saveBtn").disabled = !canWrite; }
+      msg.textContent = "Couldn't save. Your words are still here; check your connection and press the button again.";
+    } finally { setReady(ready); }
   });
 
   $("goalBtn").onclick = async () => {
     const g = parseInt($("fGoal").value, 10);
     if (!g || g < 1) { $("fGoal").value = goal; return; }
-    try { await store.saveGoal(g); goal = g; render(); } catch { $("fGoal").value = goal; }
+    try { await store.saveGoal(g); goal = g; render(); }
+    catch { $("fGoal").value = goal; $("formMsg").className = "msg err"; $("formMsg").textContent = "Couldn't save the new goal. Try again."; }
   };
 
   $("history").addEventListener("click", async (ev) => {
@@ -542,7 +634,7 @@ svg text { fill: var(--ink-3); font-family: var(--font-data); font-size: 10px; }
     if (b.dataset.edit) loadDay(b.dataset.edit);
     else if (b.dataset.ask) { confirming = b.dataset.ask; renderHistory(); }
     else if ("cancel" in b.dataset) { confirming = null; renderHistory(); }
-    else if (b.dataset.del) { const k = b.dataset.del; confirming = null; try { await store.deleteDay(k); } catch {} renderHistory(); }
+    else if (b.dataset.del) { const k = b.dataset.del; confirming = null; try { await store.deleteDay(k); renderHistory(); } catch { renderHistory(); $("histCount").textContent = "Couldn't delete that day. Try again."; } }
   });
   $("moreBtn").onclick = () => { shown += 30; renderHistory(); };
 
@@ -569,7 +661,10 @@ svg text { fill: var(--ink-3); font-family: var(--font-data); font-size: 10px; }
     el.addEventListener("keydown", (ev) => { const t = ev.target.closest("[data-k]"); if (t && (ev.key === "Enter" || ev.key === " ") && canWrite) { ev.preventDefault(); loadDay(t.dataset.k); } });
   });
 
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && todayKey() !== shownToday) render(); });
+  setReady(false);
   render();
+  restoreDraft();
   boot();
 })();
 </script>
